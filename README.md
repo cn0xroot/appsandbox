@@ -1,6 +1,8 @@
 <img width="1028" height="446" alt="App Sandbox" src="https://github.com/user-attachments/assets/f66dcaff-201e-4cf5-8e23-bc480338f353" />
 
 
+**English** | [简体中文](README.zh-CN.md)
+
 # App Sandbox
 
 App Sandbox is a virtual machine app for Windows and macOS that's focused on performance and ease of use.
