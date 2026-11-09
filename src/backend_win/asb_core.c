@@ -2445,16 +2445,52 @@ static int spawn_iso_patch_prefetch(const wchar_t *args)
     swprintf_s(cmdline, 2048,
         L"\"%s\\iso-patch.exe\" %s", exe_dir, args);
 
+    /* Capture stdout+stderr so failure details (URL, HTTP status, package
+       name) reach the VM log instead of being discarded. */
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+    HANDLE rd = NULL, wr = NULL;
+    if (!CreatePipe(&rd, &wr, &sa, 0)) {
+        asb_log(L"prefetch: CreatePipe failed (%lu)", GetLastError());
+        return -1;
+    }
+    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi = { 0 };
-    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
     si.wShowWindow = SW_HIDE;
-    if (!CreateProcessW(NULL, cmdline, NULL, NULL, FALSE,
+    si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = wr;
+    si.hStdError  = wr;
+    if (!CreateProcessW(NULL, cmdline, NULL, NULL, TRUE,
                         CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         asb_log(L"prefetch: CreateProcess failed (%lu) for: %s",
                 GetLastError(), cmdline);
+        CloseHandle(rd); CloseHandle(wr);
         return -1;
     }
+    CloseHandle(wr);
+
+    /* Read until the child closes the pipe; forward complete lines. */
+    char buf[1024], line[1024];
+    size_t ll = 0;
+    DWORD n;
+    while (ReadFile(rd, buf, sizeof(buf), &n, NULL) && n > 0) {
+        for (DWORD i = 0; i < n; i++) {
+            char c = buf[i];
+            if (c == '\n' || ll == sizeof(line) - 1) {
+                while (ll && line[ll - 1] == '\r') ll--;
+                line[ll] = 0;
+                if (ll) asb_log(L"[iso-patch] %S", line);
+                ll = 0;
+                if (c == '\n') continue;
+            }
+            line[ll++] = c;
+        }
+    }
+    if (ll) { line[ll] = 0; asb_log(L"[iso-patch] %S", line); }
+    CloseHandle(rd);
+
     WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD ec = 1;
     GetExitCodeProcess(pi.hProcess, &ec);
